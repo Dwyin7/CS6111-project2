@@ -2,7 +2,7 @@
 # python3 project2.py [-spanbert|-gemini] <google api key> <google engine id> <google gemini api key> <r> <t> <q> <k>
 # e.g.
 # python3 project2.py -spanbert "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8" "56f4e4ae2f4944372" "123" 2 0.7 "bill gates microsoft" 10
-import argparse
+# import argparse
 from googleapiclient.discovery import build
 import sys
 from bs4 import BeautifulSoup
@@ -11,16 +11,14 @@ import spacy
 from SpanBERT.spanbert import SpanBERT
 from SpanBERT.spacy_help_functions import *
 import re
-from gemini2 import gemini
+from gemini import gemini
 
 nlp = spacy.load("en_core_web_lg")
 
 
 spanbert = None
-# CX = "56f4e4ae2f4944372"  # engine ID
-# KEY = "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8"  # Key
-
-# GEMINI_KEY = "AIzaSyAg_Arq31eMN18BQI_VcxB_AMinn5ATnBY"
+CX = "56f4e4ae2f4944372"  # engine ID
+KEY = "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8"  # Key
 
 relation_map = {
         0:"per:schools_attended",
@@ -29,7 +27,6 @@ relation_map = {
         3:"org:top_members/employees",
     }
 target_relation = ""
-entity_of_interests_lst = [("PERSON","ORGANIZATION"),("PERSON","ORGANIZATION"),("PERSON","LOCATION","CITY","STATE_OR_PROVINCE","COUNTRY"),("ORGANIZATION","PERSON")]
 
 headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -42,6 +39,7 @@ headers = {
         'Cache-Control': 'max-age=0',
     }
 
+entity_of_interests_lst = [("PERSON","ORGANIZATION"),("PERSON","ORGANIZATION"),("PERSON","LOCATION","CITY","STATE_OR_PROVINCE","COUNTRY"),("ORGANIZATION","PERSON")]
 
 def parse_response(response):
     """title, URL, and description"""
@@ -108,28 +106,58 @@ def page_extraction(url):
     return text, True
 
 
-def information_extraction(url, relation_index,mode,conf,acc,query,GEMINI_KEY):
+def information_extraction(url, relation_index,mode,conf,acc, query, GEMINI_KEY):
     #define entities set by relation_index 
     entities_of_interest = entity_of_interests_lst[relation_index]
+
     # method: [-spanbert|-gemini]
     content,ok = page_extraction(url)
     if not ok:
-        return 
+        return False
     doc = nlp(content)
-    #spanbert for doc
+    #spanbert or gemini for doc
     if mode == "-spanbert":
-        SB(doc,relation_index,conf,acc)
-    # gemini
+        SB(doc,relation_index,conf,acc, entities_of_interest)
     elif mode == "-gemini":    
-        run_gemini(GEMINI_KEY, doc, relation_index, acc, query, entities_of_interest)
+        run_gemini(GEMINI_KEY, doc, relation_index, acc, entities_of_interest)
     return True
 
 
-def SB(doc, relation_index, conf,acc):
+def run_gemini(GEMINI_KEY, doc, relation_index, X, entities_of_interest):
+    ori_len = len(X.keys())
+
+    print(f"Extracted {len(list(doc.sents))} sentences. Processing each sentence one by one to check for presence of right pair of named entity types; if so, run gemini ...")
+    anno =0
+    g_count =0
+    for i,sentence in enumerate(doc.sents):
+        # report process
+        if (i+1)%5 == 0:
+            print(f"Processed {i+1} / {len(list(doc.sents))} sentences")
+
+        #check if the content contains tag neede in relation    
+        sentence_entity_pairs = create_entity_pairs(sentence, entities_of_interest)
+        if len(sentence_entity_pairs) == 0:
+            continue
+        else:
+            # print("\tProcess with Gemini. Sentence: {}".format(sentence))
+            anno+=1
+            count, prompt = gemini(GEMINI_KEY, relation_index, X, sentence, g_count)
+            g_count += count
+    
+    #print one example prompt
+    if g_count>0:
+        print(f"\nLast prompt={prompt}")
+    print(f"\nExtracted annotations for  {anno}  out of total  {len(list(doc.sents))}  sentences from spaCy, {g_count} from Gemini.")
+    print(f"Relations extracted from this website: {len(X.keys()) - ori_len} (Overall: {len(X.keys())})\n\n")
+            
+    return X
+
+
+
+def SB(doc, relation_index, conf, acc, entities_of_interest):
     global spanbert
     # subject:: PERSON object:: {'ORGANIZATION'}
     # print(relation_index)
-    entities_of_interest = entity_of_interests_lst[relation_index]
     sub = entity_of_interests_lst[relation_index][0]
     objective = set(entity_of_interests_lst[relation_index][1:])
     ext_ct = 0
@@ -187,37 +215,7 @@ def SB(doc, relation_index, conf,acc):
     return acc
 
 
-def run_gemini(GEMINI_KEY, doc, relation_index, X, query, entities_of_interest):
-    ori_len = len(X.keys())
-    #build dict
-    label_dict ={}
-    for ent in doc.ents:
-        label_dict[ent.text] = ent.label_
-    # print(label_dict)
-
-    print(f"Extracted {len(list(doc.sents))} sentences. Processing each sentence one by one to check for presence of right pair of named entity types; if so, run gemini ...")
-    anno =0
-    for i,sentence in enumerate(doc.sents):
-        # report process
-        if (i+1)%5 == 0:
-            print(f"Processed {i+1} / {len(list(doc.sents))} sentences")
-
-        #check if the content contains tag neede in relation    
-        sentence_entity_pairs = create_entity_pairs(sentence, entities_of_interest)
-        if len(sentence_entity_pairs) == 0:
-            continue
-        else:
-            # print("\tProcess with Gemini. Sentence: {}".format(sentence))
-            anno+=1
-            gemini(GEMINI_KEY, relation_index, X, sentence, query, label_dict)
-
-    print(f"Extracted annotations for  {anno}  out of total  {len(list(doc.sents))}  sentences")
-    print(f"Relations extracted from this website: {len(X.keys()) - ori_len} (Overall: {len(X.keys())})")
-            
-    return True
-
-
-def ISE(query, mode, relation_index,conf,k, engine_id, engine_key,GEMINI_KEY=None):
+def ISE(query, mode, relation_index, conf, k, engine_id, engine_key, GEMINI_KEY):
     # iterative set expansion
     X = defaultdict(int) #(sub,relation,obj): conf
     seen_url = set()
@@ -230,21 +228,21 @@ def ISE(query, mode, relation_index,conf,k, engine_id, engine_key,GEMINI_KEY=Non
     cur_query = query
     iter_count = 0
     while len(X.keys()) < k:
-        
+
         print(f"=========== Iteration: {iter_count} - Query: {cur_query} =============")
         iter_count += 1
 
         result, _, _ = search_by_query(cur_query, engine_id, engine_key)
         for i,r in enumerate(result):
+            print(f"URL ({i+1}/10) :", end=' ')
             url = r['url']
             if url in seen_url:
                 print("Skip visited URL...")
                 continue
             seen_url.add(url)
             #process url
-            print(f"URL ({i+1}/10) :")
-            information_extraction(url,relation_index,mode,conf,X,query,GEMINI_KEY)
-            # return 
+            information_extraction(url,relation_index,mode,conf,X, query, GEMINI_KEY)
+            # return
             
         print_pretty_relations(X)
         
@@ -291,19 +289,24 @@ def main():
     t = float(sys.argv[6])
     q = sys.argv[7]
     k = int(sys.argv[8])
-    global spanbert
     global target_relation
     target_relation = relation_map[r-1]
 
-    print("Mode:", mode)
+
+
+    print("Parameters:")
     print("Google API Key:", google_api_key)
     print("Google Engine ID:", google_engine_id)
     print("Google Gemini API Key:", GEMINI_KEY)
+    print("Mode:", mode)
     print("Relation:", relation_map[r-1]) #1-4
-    print("Threshold:", t)
     print("Seed Query:", q)
     print("Number of Tuples:", k)
-    ISE(q,mode,r-1,t,k, google_engine_id, google_api_key,GEMINI_KEY)
+    if mode == "-spanbert":
+        global spanbert
+        print("Threshold:", t)
+    
+    ISE(q,mode,r-1,t,k, google_engine_id, google_api_key, GEMINI_KEY)
 
 
 if __name__ == "__main__":
