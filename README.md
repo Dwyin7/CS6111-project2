@@ -15,7 +15,7 @@ Reference: https://www.cs.columbia.edu/~gravano/cs6111/Proj2/
 ## Detail
 1. Group members: Dawei Yin, dy2482 & Yenchu Chen, yc4360
 2. List of files:
-    * `main.py`: This Python script is designed for running an information extraction process using either SpanBERT or Google Gemini for relation extraction from web content, based on a given seed query. It responsible for collecting search results, using spaCy library to extract named entities, and implementing SpenBert.
+    * `project2.py`: This Python script is designed for running an information extraction process using either SpanBERT or Google Gemini for relation extraction from web content, based on a given seed query. It responsible for collecting search results, using spaCy library to extract named entities, and implementing SpenBert.
     * `gemini.py`: This Python script integrates Google's Generative AI (Gemini API) for relation extraction tasks. It defines functions to generate prompts for Gemini, fetch responses from the API, and extract relation tuples.
     * `README.md`: This file contains a description of the project, providing an overview of its purpose and functionality.
     * `requirements.txt`: This file lists all the packages used in the project, ensuring compatibility and ease of setup for other users.
@@ -25,22 +25,22 @@ Reference: https://www.cs.columbia.edu/~gravano/cs6111/Proj2/
    The format of transcript follow this reference: https://www.cs.columbia.edu/~gravano/cs6111/Proj2/Proj2-Transcripts/.
       
 3. Instruction to run the project:
-    Enter into the directory: proj2 where main.py file is located, then activate the environment.
+    Enter into the directory: proj2 where project2.py file is located, then activate the environment.
    ```
    source dbproj/bin/activate
    ```
    
-   Run: python3 main.py -$model_name “$JSON_API_KEY” “$Engine_ID” “$Gemini API key" $relation $extract_threshold $seed_query $output_len
+   Run: python3 project2.py -$model_name “$JSON_API_KEY” “$Engine_ID” “$Gemini API key" $relation $extract_threshold $seed_query $output_len
    For example:
    
    SpenBERT
    ```
-   python3 main.py -spanbert "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8" "56f4e4ae2f4944372" "xxx" 2 0.7 "bill gates microsoft" 10
+   python3 project2.py -spanbert "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8" "56f4e4ae2f4944372" "Gemini-API-key" 2 0.7 "bill gates microsoft" 10
    ```
 
    Gemini
    ```
-   python3 main.py -gemini "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8" "56f4e4ae2f4944372" "xxx" 2 0.0 "bill gates microsoft" 10
+   python3 project2.py -gemini "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8" "56f4e4ae2f4944372" "Gemini-API-key" 2 0.0 "bill gates microsoft" 10
    ```
    * $model_name: indicating the extraction model used. Options: "-spanbert" for SpanBERT or "-gemini" for Google Gemini.
    * $relation: indicating the type of relation to extract. Options: an integer; where Schools_Attended(1), Work_For(2), Live_In(3), Top_Member_Employees(4).
@@ -73,9 +73,9 @@ Reference: https://www.cs.columbia.edu/~gravano/cs6111/Proj2/
 
 6. Description of SpanBERT and GEMINI method:
    * Information Extraction[information_extraction]:
-      1. Check and extract the content from the URL.(page_extraction)
+      1. Check and extract the content from the URL, with removing the excesses space, tabs, or newlines.(page_extraction)
       2. If the content can be used, do Named Entity Recognition by SpaCy and generate doc.
-      3. Feed into LLM to extract the relations.
+      3. If the SpanBERT is used, feed the generated doc to the SpanBERT, otherwise feed into the GEMINI to extract the relations.
    
    * SpanBERT[SB]:
    Input Web content:doc that has been processed by spaCy, entities_of_interest and relation_index, threshold:conf, relation sets: acc; update relation sets: acc

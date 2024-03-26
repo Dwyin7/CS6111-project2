@@ -2,7 +2,7 @@
 # python3 project2.py [-spanbert|-gemini] <google api key> <google engine id> <google gemini api key> <r> <t> <q> <k>
 # e.g.
 # python3 project2.py -spanbert "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8" "56f4e4ae2f4944372" "123" 2 0.7 "bill gates microsoft" 10
-import argparse
+# import argparse
 from googleapiclient.discovery import build
 import sys
 from bs4 import BeautifulSoup
@@ -11,36 +11,40 @@ import spacy
 from SpanBERT.spanbert import SpanBERT
 from SpanBERT.spacy_help_functions import *
 import re
-from gemini2 import gemini
+from gemini import gemini
 
 nlp = spacy.load("en_core_web_lg")
 
 
 spanbert = None
-# CX = "56f4e4ae2f4944372"  # engine ID
-# KEY = "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8"  # Key
-
-# GEMINI_KEY = "AIzaSyAg_Arq31eMN18BQI_VcxB_AMinn5ATnBY"
+CX = "56f4e4ae2f4944372"  # engine ID
+KEY = "AIzaSyBdPoK9zbUZXnDHG4LMMu972zSH7nGdnM8"  # Key
 
 relation_map = {
-        0:"per:schools_attended",
-        1:"per:employee_of",
-        2:"per:cities_of_residence",
-        3:"org:top_members/employees",
-    }
+    0: "per:schools_attended",
+    1: "per:employee_of",
+    2: "per:cities_of_residence",
+    3: "org:top_members/employees",
+}
 target_relation = ""
-entity_of_interests_lst = [("PERSON","ORGANIZATION"),("PERSON","ORGANIZATION"),("PERSON","LOCATION","CITY","STATE_OR_PROVINCE","COUNTRY"),("ORGANIZATION","PERSON")]
 
 headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://www.google.com/',
-        'DNT': '1',  # Do Not Track Request Header
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Cache-Control': 'max-age=0',
-    }
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Referer": "https://www.google.com/",
+    "DNT": "1",  # Do Not Track Request Header
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Cache-Control": "max-age=0",
+}
+
+entity_of_interests_lst = [
+    ("PERSON", "ORGANIZATION"),
+    ("PERSON", "ORGANIZATION"),
+    ("PERSON", "LOCATION", "CITY", "STATE_OR_PROVINCE", "COUNTRY"),
+    ("ORGANIZATION", "PERSON"),
+]
 
 
 def parse_response(response):
@@ -82,23 +86,22 @@ def search_by_query(query, engine_id, engine_key):
 def page_extraction(url):
     print(f"{url}")
     try:
-        response = requests.get(url=url,headers=headers, timeout=60)  # timeout 60s
+        response = requests.get(url=url, headers=headers, timeout=60)  # timeout 60s
         if response.status_code != 200:
             print(f"Request to {url} failed with status code {response.status_code}")
             return None, False
     except Exception as e:
         print(e)
         return None, False
-    
-    soup = BeautifulSoup(response.text, 'html.parser')
+
+    soup = BeautifulSoup(response.text, "html.parser")
     # for script in soup(["script", "style",'[document]', 'head', 'title']):
     #     script.extract()    # rip it out
     text = soup.get_text()
-    text = re.sub(r'[\n\t\s]+', ' ', text)
+    text = re.sub(r"[\n\t\s]+", " ", text)
     lines = (line.strip() for line in text.splitlines())
     text.strip()
-    text = ' '.join(lines)
-
+    text = " ".join(lines)
 
     print(f"Webpage length (num characters): {len(text)}")
     # truncate if necessary
@@ -108,58 +111,95 @@ def page_extraction(url):
     return text, True
 
 
-def information_extraction(url, relation_index,mode,conf,acc,query,GEMINI_KEY):
-    #define entities set by relation_index 
+def information_extraction(url, relation_index, mode, conf, acc, query, GEMINI_KEY):
+    # define entities set by relation_index
     entities_of_interest = entity_of_interests_lst[relation_index]
+
     # method: [-spanbert|-gemini]
-    content,ok = page_extraction(url)
+    content, ok = page_extraction(url)
     if not ok:
-        return 
+        return False
     doc = nlp(content)
-    #spanbert for doc
+    # spanbert or gemini for doc
     if mode == "-spanbert":
-        SB(doc,relation_index,conf,acc)
-    # gemini
-    elif mode == "-gemini":    
-        run_gemini(GEMINI_KEY, doc, relation_index, acc, query, entities_of_interest)
+        SB(doc, relation_index, conf, acc, entities_of_interest)
+    elif mode == "-gemini":
+        run_gemini(GEMINI_KEY, doc, relation_index, acc, entities_of_interest)
     return True
 
 
-def SB(doc, relation_index, conf,acc):
+def run_gemini(GEMINI_KEY, doc, relation_index, X, entities_of_interest):
+    ori_len = len(X.keys())
+
+    print(
+        f"Extracted {len(list(doc.sents))} sentences. Processing each sentence one by one to check for presence of right pair of named entity types; if so, run gemini ..."
+    )
+    anno = 0
+    g_count = 0
+    for i, sentence in enumerate(doc.sents):
+        # report process
+        if (i + 1) % 5 == 0:
+            print(f"Processed {i+1} / {len(list(doc.sents))} sentences")
+
+        # check if the content contains tag neede in relation
+        sentence_entity_pairs = create_entity_pairs(sentence, entities_of_interest)
+        if len(sentence_entity_pairs) == 0:
+            continue
+        else:
+            # print("\tProcess with Gemini. Sentence: {}".format(sentence))
+            anno += 1
+            count, prompt = gemini(GEMINI_KEY, relation_index, X, sentence, g_count)
+            g_count += count
+
+    # print one example prompt
+    if g_count > 0:
+        print(f"\nLast prompt={prompt}")
+    print(
+        f"\nExtracted annotations for  {anno}  out of total  {len(list(doc.sents))}  sentences from spaCy, {g_count} from Gemini."
+    )
+    print(
+        f"Relations extracted from this website: {len(X.keys()) - ori_len} (Overall: {len(X.keys())})\n\n"
+    )
+
+    return X
+
+
+def SB(doc, relation_index, conf, acc, entities_of_interest):
     global spanbert
     # subject:: PERSON object:: {'ORGANIZATION'}
-    # print(relation_index)
-    entities_of_interest = entity_of_interests_lst[relation_index]
     sub = entity_of_interests_lst[relation_index][0]
     objective = set(entity_of_interests_lst[relation_index][1:])
     ext_ct = 0
     ext_total = 0
     ext_st_ct = 0
-    print(f"Extracted {len(list(doc.sents))} sentences. Processing each sentence one by one to check for presence of right pair of named entity types; if so, will run the second pipeline ...")
-    for i,sentence in enumerate(doc.sents):
-        ents = get_entities(sentence, entities_of_interest)
-        flag = False
+    print(
+        f"Extracted {len(list(doc.sents))} sentences. Processing each sentence one by one to check for presence of right pair of named entity types; if so, will run the second pipeline ..."
+    )
+    for i, sentence in enumerate(doc.sents):
+        # ents = get_entities(sentence, entities_of_interest)
         # print("sentence:::", sentence)
         # print("spaCy extracted entities: {}".format(ents))
-        if (i+1)%5 == 0:
+        if (i + 1) % 5 == 0:
             print(f"Processed {i+1} / {len(list(doc.sents))} sentences")
         candidate_pairs = []
         sentence_entity_pairs = create_entity_pairs(sentence, entities_of_interest)
         for ep in sentence_entity_pairs:
-            e1,e2 = ep[1],ep[2]
+            e1, e2 = ep[1], ep[2]
             if e1[1] == sub and e2[1] in objective:
                 candidate_pairs.append({"tokens": ep[0], "subj": ep[1], "obj": ep[2]})
             if e2[1] == sub and e1[1] in objective:
                 candidate_pairs.append({"tokens": ep[0], "subj": ep[2], "obj": ep[1]})
-            
+
         # print("candidate_pairs",candidate_pairs)
         if len(candidate_pairs) == 0:
             continue
-        
-        relation_preds = spanbert.predict(candidate_pairs)  # get predictions: list of (relation, confidence) pairs
+
+        relation_preds = spanbert.predict(
+            candidate_pairs
+        )  # get predictions: list of (relation, confidence) pairs
         for ex, pred in list(zip(candidate_pairs, relation_preds)):
             relation = pred[0]
-            if relation == 'no_relation' or relation != relation_map[relation_index]:
+            if relation == "no_relation" or relation != relation_map[relation_index]:
                 continue
             print("\n\t\t=== Extracted Relation ===")
             ext_total += 1
@@ -167,114 +207,104 @@ def SB(doc, relation_index, conf,acc):
             subj = ex["subj"][0]
             obj = ex["obj"][0]
             confidence = pred[1]
-            print("\t\tRelation: {} (Confidence: {:.3f})\nSubject: {}\tObject: {}".format(relation, confidence, subj, obj))
+            print(
+                "\t\tRelation: {} (Confidence: {:.3f})\nSubject: {}\tObject: {}".format(
+                    relation, confidence, subj, obj
+                )
+            )
             if confidence > conf:
-                
+
                 if acc[(subj, relation, obj)] < confidence:
                     ext_ct += 1
                     acc[(subj, relation, obj)] = confidence
                     print("\t\tAdding to set of extracted relations")
-                    flag = True
                 else:
-                    print("\t\tDuplicate with lower confidence than existing record. Ignoring this.")
+                    print(
+                        "\t\tDuplicate with lower confidence than existing record. Ignoring this."
+                    )
             else:
-                print("\t\tConfidence is lower than threshold confidence. Ignoring this.")
+                print(
+                    "\t\tConfidence is lower than threshold confidence. Ignoring this."
+                )
             print("\t\t==========")
-        
-    print(f"Extracted annotations for  {ext_st_ct}  out of total  {len(list(doc.sents))}  sentences")
+
+    print(
+        f"Extracted annotations for  {ext_st_ct}  out of total  {len(list(doc.sents))}  sentences"
+    )
     ext_st_ct += 1
     print(f"Relations extracted from this website: {ext_ct} (Overall: {ext_total})")
     return acc
 
 
-def run_gemini(GEMINI_KEY, doc, relation_index, X, query, entities_of_interest):
-    ori_len = len(X.keys())
-    #build dict
-    label_dict ={}
-    for ent in doc.ents:
-        label_dict[ent.text] = ent.label_
-    # print(label_dict)
-
-    print(f"Extracted {len(list(doc.sents))} sentences. Processing each sentence one by one to check for presence of right pair of named entity types; if so, run gemini ...")
-    anno =0
-    for i,sentence in enumerate(doc.sents):
-        # report process
-        if (i+1)%5 == 0:
-            print(f"Processed {i+1} / {len(list(doc.sents))} sentences")
-
-        #check if the content contains tag neede in relation    
-        sentence_entity_pairs = create_entity_pairs(sentence, entities_of_interest)
-        if len(sentence_entity_pairs) == 0:
-            continue
-        else:
-            # print("\tProcess with Gemini. Sentence: {}".format(sentence))
-            anno+=1
-            gemini(GEMINI_KEY, relation_index, X, sentence, query, label_dict)
-
-    print(f"Extracted annotations for  {anno}  out of total  {len(list(doc.sents))}  sentences")
-    print(f"Relations extracted from this website: {len(X.keys()) - ori_len} (Overall: {len(X.keys())})")
-            
-    return True
-
-
-def ISE(query, mode, relation_index,conf,k, engine_id, engine_key,GEMINI_KEY=None):
+def ISE(query, mode, relation_index, conf, k, engine_id, engine_key, GEMINI_KEY):
     # iterative set expansion
-    X = defaultdict(int) #(sub,relation,obj): conf
+    X = defaultdict(int)  # (sub,relation,obj): conf
     seen_url = set()
     used_query = set()
     used_query.add(query)
-    #load pretrained
+    # load pretrained only invoke the spanbert
     global spanbert
     if mode == "-spanbert":
-        spanbert = SpanBERT("./SpanBERT/pretrained_spanbert")  
+        spanbert = SpanBERT("./SpanBERT/pretrained_spanbert")
     cur_query = query
     iter_count = 0
     while len(X.keys()) < k:
-        
+
         print(f"=========== Iteration: {iter_count} - Query: {cur_query} =============")
         iter_count += 1
 
         result, _, _ = search_by_query(cur_query, engine_id, engine_key)
-        for i,r in enumerate(result):
-            url = r['url']
+        for i, r in enumerate(result):
+            print(f"URL ({i+1}/10) :", end=" ")
+            url = r["url"]
             if url in seen_url:
                 print("Skip visited URL...")
                 continue
             seen_url.add(url)
-            #process url
-            print(f"URL ({i+1}/10) :")
-            information_extraction(url,relation_index,mode,conf,X,query,GEMINI_KEY)
-            # return 
-            
+            # process url
+            information_extraction(
+                url, relation_index, mode, conf, X, query, GEMINI_KEY
+            )
+
+        # print X for each iterations
         print_pretty_relations(X)
-        
-        #generate new query
+
+        # generate new query
         top = 0
-        ord_candidate_tuples = sorted(X.items(), key= lambda x: x[1], reverse=True)
-        candidate_query = f"{ord_candidate_tuples[top][0][0]} {ord_candidate_tuples[top][0][2]}"
+        ord_candidate_tuples = sorted(X.items(), key=lambda x: x[1], reverse=True)
+        candidate_query = (
+            f"{ord_candidate_tuples[top][0][0]} {ord_candidate_tuples[top][0][2]}"
+        )
         while candidate_query in used_query:
             top += 1
-            candidate_query = f"{ord_candidate_tuples[top][0][0]} {ord_candidate_tuples[top][0][2]}"
+            candidate_query = (
+                f"{ord_candidate_tuples[top][0][0]} {ord_candidate_tuples[top][0][2]}"
+            )
             if top >= len(ord_candidate_tuples):
                 raise "should not happen"
         cur_query = candidate_query
         used_query.add(cur_query)
 
-    print("Total # of iterations = ",iter_count)
-    # print(X,"resultx", len(X.keys()))
-    
-    #return top k
-    ord_candidate_tuples = sorted(X.items(), key= lambda x: x[1], reverse=True)  
+    print("Total # of iterations = ", iter_count)
+
+    # return top all valid results
+    ord_candidate_tuples = sorted(X.items(), key=lambda x: x[1], reverse=True)
+
 
 def print_pretty_relations(X):
     global target_relation
     sorted_relations = sorted(X.items(), key=lambda item: item[1], reverse=True)
-    print("="*80)
+    print("=" * 80)
     print(f"ALL RELATIONS for {target_relation} ({len(sorted_relations)})")
-    print("="*80)
+    print("=" * 80)
 
-    for ((subject, _, obj), confidence) in sorted_relations:
-        print("Confidence: {:.7f} \t| Subject: {} \t| Object: {}".format(confidence, subject, obj))
+    for (subject, _, obj), confidence in sorted_relations:
+        print(
+            "Confidence: {:.7f} \t| Subject: {} \t| Object: {}".format(
+                confidence, subject, obj
+            )
+        )
+
 
 def main():
     if len(sys.argv) != 9:  # Check if the correct number of arguments are provided
@@ -291,19 +321,22 @@ def main():
     t = float(sys.argv[6])
     q = sys.argv[7]
     k = int(sys.argv[8])
-    global spanbert
     global target_relation
-    target_relation = relation_map[r-1]
+    target_relation = relation_map[r - 1]
 
-    print("Mode:", mode)
+    print("Parameters:")
     print("Google API Key:", google_api_key)
     print("Google Engine ID:", google_engine_id)
     print("Google Gemini API Key:", GEMINI_KEY)
-    print("Relation:", relation_map[r-1]) #1-4
-    print("Threshold:", t)
+    print("Mode:", mode)
+    print("Relation:", relation_map[r - 1])  # 1-4
     print("Seed Query:", q)
     print("Number of Tuples:", k)
-    ISE(q,mode,r-1,t,k, google_engine_id, google_api_key,GEMINI_KEY)
+    if mode == "-spanbert":
+        global spanbert
+        print("Threshold:", t)
+
+    ISE(q, mode, r - 1, t, k, google_engine_id, google_api_key, GEMINI_KEY)
 
 
 if __name__ == "__main__":
