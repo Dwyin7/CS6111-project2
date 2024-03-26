@@ -59,13 +59,14 @@ Reference: <https://www.cs.columbia.edu/~gravano/cs6111/Proj2/>
 5. Description of the internal design of this project:
 
    * High-level Concept[ISE]:
-     1. Initialize X (store the subject, relation, and object tuple)
+     1. Initialize X (Python dictionary, key is the subject, relation, and object tuple, and value is the confidence rate regards this relationship)
      2. Load the SpanBert pre-trained classifier if SpanBert is specified.
      3. Use the Engine ID with the server we set and the query to get the search result(top-10 webpages), and parse the web content, including remove the excess tab, space, and newline symbols. [search_by_query, parse_response].
      4. Iterates through URLs, and filter out the URL that have seen.
      5. For each unseen URL, extract the content and do extract named entities using spaCy. If the content characters >10000, trim the webpage content to 10000. Determine by the model specified, run SB or run_gemini to do information extraction.[information_extraction, page_extraction]
      6. For each query iteration, modify the X using either SpanBERT method or GEMINI method and print out all the extracted relations. [print_pretty_relations]
-     7. If the number of extracted relations < $output_len, concatenating the the subject and object in a relation that has the highest confident rate and jump back to step 2.
+     7. If the number of extracted relations is less than the desired output length ($output_len), the process involves concatenating the subject and object from the relation with the highest confidence rate. Furthermore, ensure that this chosen relation hasn't been previously used as a query. Afterward, the process loops back to step 2 for further extraction.
+   
      8. If the number of extracted relations > $output_len, teriminate the program. The result relations sets remain all the tuples extractd which may > k.
 
    * External libraries used:
