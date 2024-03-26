@@ -30,7 +30,7 @@ def generate_prompt(relation_index, X, sentence):
         0: f"a {restriction[0][0]} has attended {restriction[0][1]} for education",
         1: f"a {restriction[1][0]} is employed by or works for a {restriction[1][1]}",
         2: f"a {restriction[2][0]} has lived in {restriction[2][1]}",
-        3: f"a {restriction[3][0]} is a top member or employee of an {restriction[3][1]}",
+        3: f"a {restriction[3][1]} is a top member or employee of an {restriction[3][0]}",
     }
 
     one_shot = {
